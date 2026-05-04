@@ -294,7 +294,7 @@ impl TestServer {
                         cx.background_spawn(server.handle_connection(
                             server_conn,
                             client_name,
-                            Principal::User(user),
+                            Principal::User(user.into()),
                             ZedVersion(semver::Version::new(1, 0, 0)),
                             Some("test".to_string()),
                             None,
@@ -356,7 +356,6 @@ impl TestServer {
                 settings::KeymapFile::load_asset_allow_partial_failure(os_keymap, cx).unwrap(),
             );
             language_model::LanguageModelRegistry::test(cx);
-            assistant_text_thread::init(client.clone(), cx);
         });
 
         client
@@ -438,7 +437,12 @@ impl TestServer {
         admin: (&TestClient, &mut TestAppContext),
         members: &mut [(&TestClient, &mut TestAppContext)],
     ) -> ChannelId {
-        let (_, admin_cx) = admin;
+        let (admin_client, admin_cx) = admin;
+
+        // Subscribe to channels (simulates opening the collab panel)
+        admin_client.initialize_channel_store(admin_cx);
+        admin_cx.executor().run_until_parked();
+
         let channel_id = admin_cx
             .read(ChannelStore::global)
             .update(admin_cx, |channel_store, cx| {
@@ -448,6 +452,10 @@ impl TestServer {
             .unwrap();
 
         for (member_client, member_cx) in members {
+            // Subscribe member to channels (simulates opening the collab panel)
+            member_client.initialize_channel_store(member_cx);
+            member_cx.executor().run_until_parked();
+
             admin_cx
                 .read(ChannelStore::global)
                 .update(admin_cx, |channel_store, cx| {
@@ -664,6 +672,12 @@ impl TestClient {
             .user_store
             .update(cx, |store, _| store.clear_contacts())
             .await;
+    }
+
+    /// Subscribe to channels. In production this happens when the user opens the collab panel.
+    pub fn initialize_channel_store(&self, cx: &mut TestAppContext) {
+        self.channel_store
+            .update(cx, |channel_store, _| channel_store.initialize());
     }
 
     pub fn local_projects(&self) -> impl Deref<Target = Vec<Entity<Project>>> + '_ {

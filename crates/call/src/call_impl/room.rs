@@ -21,7 +21,7 @@ use language::LanguageRegistry;
 use livekit::{LocalTrackPublication, ParticipantIdentity, RoomEvent};
 use livekit_client::{self as livekit, AudioStream, TrackSid};
 use postage::{sink::Sink, stream::Stream, watch};
-use project::Project;
+use project::{CURRENT_PROJECT_FEATURES, Project};
 use settings::Settings as _;
 use std::sync::atomic::AtomicU64;
 use std::{future::Future, mem, rc::Rc, sync::Arc, time::Duration, time::Instant};
@@ -66,6 +66,8 @@ pub enum Event {
     RoomLeft {
         channel_id: Option<ChannelId>,
     },
+    LocalScreenShareStarted,
+    LocalScreenShareStopped,
 }
 
 pub struct Room {
@@ -1237,6 +1239,10 @@ impl Room {
             worktrees: project.read(cx).worktree_metadata_protos(cx),
             is_ssh_project: project.read(cx).is_via_remote_server(),
             windows_paths: Some(project.read(cx).path_style(cx) == PathStyle::Windows),
+            features: CURRENT_PROJECT_FEATURES
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
         });
 
         cx.spawn(async move |this, cx| {
@@ -1509,6 +1515,7 @@ impl Room {
                                 track_publication: publication,
                                 _stream: stream,
                             };
+                            cx.emit(Event::LocalScreenShareStarted);
                             cx.notify();
                         }
 
@@ -1670,6 +1677,7 @@ impl Room {
                     let sid = track_publication.sid();
                     cx.spawn(async move |_, cx| local_participant.unpublish_track(sid, cx).await)
                         .detach_and_log_err(cx);
+                    cx.emit(Event::LocalScreenShareStopped);
                     cx.notify();
                 }
 
